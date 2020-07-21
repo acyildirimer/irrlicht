@@ -9,6 +9,7 @@
 #include "IMeshManipulator.h"
 #include "SMesh.h"
 #include "CDynamicMeshBuffer.h"
+#include "CMeshTextureLoader.h"
 #include "SAnimatedMesh.h"
 #include "IReadFile.h"
 #include "fast_atof.h"
@@ -23,9 +24,13 @@ namespace scene
 #define PLY_INPUT_BUFFER_SIZE 51200 // file is loaded in 50k chunks
 
 // constructor
-CPLYMeshFileLoader::CPLYMeshFileLoader(scene::ISceneManager* smgr)
-: SceneManager(smgr), File(0), Buffer(0)
+CPLYMeshFileLoader::CPLYMeshFileLoader(scene::ISceneManager* smgr, io::IFileSystem* fs)
+: SceneManager(smgr), File(0), Buffer(0), FileSystem(fs)
 {
+    if (FileSystem)
+        FileSystem->grab();
+
+    TextureLoader = new CMeshTextureLoader( FileSystem, SceneManager->getVideoDriver() );
 }
 
 
@@ -43,6 +48,9 @@ CPLYMeshFileLoader::~CPLYMeshFileLoader()
 	for (u32 i=0; i<ElementList.size(); ++i)
 		delete ElementList[i];
 	ElementList.clear();
+    
+    if (FileSystem)
+        FileSystem->drop();
 }
 
 
@@ -85,6 +93,8 @@ IAnimatedMesh* CPLYMeshFileLoader::createMesh(io::IReadFile* file)
 		getNextLine();
 		// grab the word from this line
 		c8 *word = getNextWord();
+        
+        io::path textureName;
 
 		// ignore comments
 		while (strcmp(word, "comment") == 0)
@@ -211,7 +221,13 @@ IAnimatedMesh* CPLYMeshFileLoader::createMesh(io::IReadFile* file)
 			}
 			else if (strcmp(word, "comment") == 0)
 			{
-				// ignore line
+                c8 *commentPropery = getNextWord();
+
+                if(strcmp(commentPropery, "TextureFile") == 0)
+                {
+                    c8 *temp = getNextWord();
+                    textureName = core::string<c8>(temp, strlen(temp));
+                }
 			}
 			else
 			{
@@ -230,7 +246,7 @@ IAnimatedMesh* CPLYMeshFileLoader::createMesh(io::IReadFile* file)
 		if (continueReading)
 		{
 			// create a mesh buffer
-			CDynamicMeshBuffer *mb = new CDynamicMeshBuffer(video::EVT_STANDARD, vertCount > 65565 ? video::EIT_32BIT : video::EIT_16BIT);
+			CDynamicMeshBuffer *mb = new CDynamicMeshBuffer(video::EVT_STANDARD, vertCount > 65536 ? video::EIT_32BIT : video::EIT_16BIT);
 			mb->getVertexBuffer().reallocate(vertCount);
 			mb->getIndexBuffer().reallocate(vertCount);
 			mb->setHardwareMappingHint(EHM_STATIC);
@@ -262,15 +278,42 @@ IAnimatedMesh* CPLYMeshFileLoader::createMesh(io::IReadFile* file)
 			mb->recalculateBoundingBox();
 			if (!hasNormals)
 				SceneManager->getMeshManipulator()->recalculateNormals(mb);
-			SMesh* m = new SMesh();
-			m->addMeshBuffer(mb);
-			m->recalculateBoundingBox();
+			
+            if (textureName.size() && getMeshTextureLoader())
+            {
+                const io::path relPath = FileSystem->getFileDir(file->getFileName())+"/";
+                
+                if(FileSystem->existFile(relPath + textureName))
+                {
+                    video::ITexture * texture = getMeshTextureLoader()->getTexture(relPath + textureName);
+                    
+                        if ( texture )
+                        {
+                            mb->Material.setTexture(0, texture);
+
+                            // Set diffuse material color to white so as not to affect texture color
+                            // Because Maya set diffuse color Kd to black when you use a diffuse color map
+                            // But is this the right thing to do?
+                            mb->Material.DiffuseColor.set(255, 255, 255, 255);
+                            mb->Material.AmbientColor.set(255, 255, 255, 255);
+                            mb->Material.SpecularColor.set(255, 255, 255, 255);
+                        }
+
+                }
+            }
+            
+            SMesh* m = new SMesh();
+            m->addMeshBuffer(mb);
+            m->recalculateBoundingBox();
+                
 			mb->drop();
 			animMesh = new SAnimatedMesh();
 			animMesh->addMesh(m);
 			animMesh->recalculateBoundingBox();
-			m->drop();
+            m->drop();
 		}
+        
+        
 	}
 
 
@@ -572,7 +615,7 @@ c8* CPLYMeshFileLoader::getNextLine()
 	StartPointer = LineEndPointer + 1;
 
 	// crlf split across buffer move
-	if (*StartPointer == '\n')
+	if (StartPointer<EndPointer && *StartPointer == '\n')
 	{
 		*StartPointer = '\0';
 		++StartPointer;
@@ -583,7 +626,7 @@ c8* CPLYMeshFileLoader::getNextLine()
 	while (pos < EndPointer && *pos && *pos != '\r' && *pos != '\n')
 		++pos;
 
-	if ( pos < EndPointer && ( *(pos+1) == '\r' || *(pos+1) == '\n') )
+	if ( (pos+1) < EndPointer && ( *(pos+1) == '\r' || *(pos+1) == '\n') )
 	{
 		*pos = '\0';
 		++pos;
