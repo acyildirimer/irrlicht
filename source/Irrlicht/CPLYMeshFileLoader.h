@@ -8,6 +8,7 @@
 #include "IMeshLoader.h"
 #include "ISceneManager.h"
 #include "CDynamicMeshBuffer.h"
+#include "IFileSystem.h"
 
 namespace irr
 {
@@ -31,7 +32,7 @@ class CPLYMeshFileLoader : public IMeshLoader
 public:
 
 	//! Constructor
-	CPLYMeshFileLoader(scene::ISceneManager* smgr);
+	CPLYMeshFileLoader(scene::ISceneManager* smgr, io::IFileSystem* fs);
 
 	//! Destructor
 	virtual ~CPLYMeshFileLoader();
@@ -139,10 +140,11 @@ private:
 	bool IsBinaryFile, IsWrongEndian, EndOfFile;
 	s32 WordLength;
 	c8 *StartPointer, *EndPointer, *LineEndPointer;
+    
+    io::IFileSystem* FileSystem;
 };
 
 } // end namespace scene
 } // end namespace irr
 
 #endif
-
