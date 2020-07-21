@@ -141,7 +141,7 @@ private:
 	s32 WordLength;
 	c8 *StartPointer, *EndPointer, *LineEndPointer;
     
-    io::IFileSystem* FileSystem;
+	io::IFileSystem* FileSystem;
 };
 
 } // end namespace scene
